@@ -1,0 +1,14 @@
+//
+// Created by abiel on 1/6/20.
+//
+
+#ifndef BOTBUSTERSREBIRTH_SHOOTERMANAGER_H
+#define BOTBUSTERSREBIRTH_SHOOTERMANAGER_H
+
+
+class ShooterManager {
+
+};
+
+
+#endif //BOTBUSTERSREBIRTH_SHOOTERMANAGER_H

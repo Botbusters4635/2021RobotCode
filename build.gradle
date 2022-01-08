@@ -1,0 +1,218 @@
+plugins {
+    id "cpp"
+    id "google-test-test-suite"
+    id "edu.wpi.first.GradleRIO" version "2021.3.1"
+}
+import jaci.gradle.nativedeps.*
+
+def roboRIODeployDir = '"' + '/home/lvuser/deploy/' + '"'
+def ntRemoteServer = '"' + '187.162.43.150' + '"'
+def ntRemotePort = '1735'
+// Define my targets (RoboRIO) and artifacts (deployable files)
+// This is added by GradleRIO's backing project EmbeddedTools.
+deploy {
+    targets {
+        roboRIO("roborio") {
+            // Team number is loaded either from the .wpilib/wpilib_preferences.json
+            // or from command line. If not found an exception will be thrown.
+            // You can use getTeamOrDefault(team) instead of getTeamNumber if you
+            // want to store a team number in this file.
+            team = frc.getTeamOrDefault(4635)
+        }
+    }
+    artifacts {
+        frcNativeArtifact('frcCpp') {
+            targets << "roborio"
+            component = 'frcUserProgram'
+            // Debug can be overridden by command line, for use with VSCode
+            debug = frc.getDebugOrDefault(false)
+        }
+        // Built in artifact to deploy arbitrary files to the roboRIO.
+        fileTreeArtifact('frcStaticFileDeploy') {
+            // The directory below is the local directory to deploy
+            files = fileTree(dir: 'src/main/deploy')
+            // Deploy to RoboRIO target, into /home/lvuser/deploy
+            targets << "roborio"
+            directory = roboRIODeployDir
+        }
+    }
+}
+
+// set this to true to include the src folder in the include directories passed
+// to the compiler. Some eclipse project imports depend on this behavior.
+// We recommend leaving this disabled if possible. Note for eclipse project
+// imports this is enabled by default. For new projects, its disabled
+def includeSrcInIncludeRoot = false
+
+// set this to true to enable desktop support.
+// ""./gradlew clion" only generates a valid CMakeLists.txt file if this is set to false, set to false to generate and return to true afterwards
+def includeDesktopSupport = false
+
+// Enable simulation gui support. Must check the box in vscode to enable support
+// upon debugging
+dependencies {
+    simulation wpi.deps.sim.gui(wpi.platforms.desktop, true)
+    simulation wpi.deps.sim.driverstation(wpi.platforms.desktop, true)
+
+    // Websocket extensions require additional configuration.
+    // simulation wpi.deps.sim.ws_server(wpi.platforms.desktop, true)
+    // simulation wpi.deps.sim.ws_client(wpi.platforms.desktop, true)
+}
+
+// Simulation configuration (e.g. environment variables).
+sim {
+    // Sets the websocket client remote host.
+    // envVar "HALSIMWS_HOST", "10.0.0.2"
+}
+
+model {
+    components {
+        sysidlib(NativeLibrarySpec) {
+                    targetPlatform wpi.platforms.roborio
+                    if (includeDesktopSupport) {
+                        targetPlatform wpi.platforms.desktop
+                    }
+
+                    sources.cpp {
+                        source {
+                            srcDir "libs/sysid/sysid-library/src/main/cpp"
+                            include '**/*.cpp'
+                        }
+                        exportedHeaders {
+                            srcDir "libs/sysid/sysid-library/src/main/include"
+                            include '**/*.h'
+                        }
+                    }
+
+                    wpi.deps.vendor.cpp(it)
+                    wpi.deps.wpilib(it)
+                }
+
+        fmt(NativeLibrarySpec) {
+            targetPlatform wpi.platforms.roborio
+            if (includeDesktopSupport) {
+                targetPlatform wpi.platforms.desktop
+            }
+
+            sources.cpp {
+                source {
+                    srcDir "libs/fmt/src"
+                    include '**/*.cc'
+                }
+                exportedHeaders {
+                    srcDir "libs/fmt/include"
+                    include '**/*.h'
+                }
+            }
+        }
+
+        spdlog(NativeLibrarySpec) {
+            targetPlatform wpi.platforms.roborio
+            if (includeDesktopSupport) {
+                targetPlatform wpi.platforms.desktop
+            }
+
+            binaries.all {
+                cppCompiler.define "SPDLOG_FMT_EXTERNAL"
+                cppCompiler.define "SPDLOG_COMPILED_LIB"
+
+                lib library: 'fmt', linkage: 'shared'
+            }
+
+            sources.cpp {
+                source {
+                    srcDir "libs/spdlog/src"
+                    include '**/*.cpp'
+                }
+                exportedHeaders {
+                    srcDir "libs/spdlog/include"
+                }
+            }
+        }
+
+        frcUserProgram(NativeExecutableSpec) {
+            targetPlatform wpi.platforms.roborio
+
+            if (includeDesktopSupport) {
+                targetPlatform wpi.platforms.desktop
+            }
+
+            binaries.all {
+                    if (buildType.name == 'release') it.buildable = false
+
+                    cppCompiler.define "SPDLOG_FMT_EXTERNAL"
+                    def target = targetPlatform.name == wpi.platforms.roborio ? 'Robot' : 'Simulation'
+                    if (target == 'Simulation') {
+                        cppCompiler.define('SIMULATION')
+                        def projectDir = '"' + project.projectDir.toString() + "/deploy/" + '"'
+                        cppCompiler.define('DEPLOY_DIR', projectDir)
+                        cppCompiler.define('NT_REMOTE_SERVER', ntRemoteServer)
+                        cppCompiler.define('NT_REMOTE_PORT', ntRemotePort)
+                    }else{
+                        cppCompiler.define('DEPLOY_DIR', roboRIODeployDir)
+                    }
+
+
+
+                    def libraryLink = 'shared'
+                    lib library: 'fmt', linkage: libraryLink
+                    lib library: 'spdlog', linkage: libraryLink
+                    lib library: 'sysidlib', linkage: libraryLink
+            }
+
+
+            sources.cpp {
+                source {
+                    srcDir 'src/'
+                    include '*.cpp', '**/*.cpp'
+                }
+                exportedHeaders {
+                    srcDir 'src/'
+                    srcDir 'libs/mINI/src'
+                }
+            }
+
+            // Defining my dependencies. In this case, WPILib (+ friends), and vendor libraries.
+            wpi.deps.vendor.cpp(it)
+            wpi.deps.wpilib(it)
+            
+        }
+    }
+    testSuites {
+        frcUserProgramTest(GoogleTestTestSuiteSpec) {
+            testing $.components.frcUserProgram
+            
+            binaries.all {
+                    def target = targetPlatform.name == wpi.platforms.roborio ? 'Robot' : 'Simulation'
+                    if (target == 'Simulation') {
+                        cppCompiler.define('SIMULATION')
+                        def projectDir = '"' + project.projectDir.toString() + "/deploy/" + '"'
+                        cppCompiler.define('DEPLOY_DIR', projectDir)
+                        cppCompiler.define('NT_REMOTE_SERVER', ntRemoteServer)
+                        cppCompiler.define('NT_REMOTE_PORT', ntRemotePort)
+                    }else{
+                        cppCompiler.define('DEPLOY_DIR', roboRIODeployDir)
+                    }
+
+                    if (buildType.name == 'release') it.buildable = false
+
+                    cppCompiler.define "SPDLOG_FMT_EXTERNAL"
+                    def libraryLink = 'shared'
+                    lib library: 'fmt', linkage: libraryLink
+                    lib library: 'spdlog', linkage: libraryLink
+                    lib library: 'sysidlib', linkage: libraryLink
+            }
+
+            sources.cpp {
+                source {
+                    srcDir 'tests/'
+                    include '*.cpp','**/*.cpp'
+                }
+            }
+
+            wpi.deps.vendor.cpp(it)
+            wpi.deps.wpilib(it)
+            wpi.deps.googleTest(it)
+        }
+    }
+}
